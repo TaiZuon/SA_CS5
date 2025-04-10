@@ -19,5 +19,5 @@ CREATE TABLE IF NOT EXISTS `commit` (
 );
 
 
-ALTER TABLE `repo` ADD CONSTRAINT `repo_fk0` FOREIGN KEY (`id`) REFERENCES `release`(`repoID`);
+ALTER TABLE `repo` ADD CONSTRAINT `repo_fk0` FOREIGN KEY (`id`) REFERENCES `release`(`id`);
 ALTER TABLE `commit` ADD CONSTRAINT `commit_fk2` FOREIGN KEY (`releaseID`) REFERENCES `release`(`id`);
