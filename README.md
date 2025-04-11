@@ -8,7 +8,6 @@ Dự án thu thập thông tin các repo nổi bật từ GitHub (stars > 1000),
 - Lưu thông tin release và commit vào MySQL
 - Hỗ trợ làm việc nhóm thông qua Docker hoặc setup local
 
----
 
 ## ⚙️ Yêu cầu hệ thống
 
@@ -16,8 +15,6 @@ Dự án thu thập thông tin các repo nổi bật từ GitHub (stars > 1000),
 - Docker (tuỳ chọn)
 - Git
 - Hệ điều hành: Windows / macOS / Linux
-
----
 
 ## 🐳 Cài đặt MySQL bằng Docker (khuyên dùng)
 
@@ -29,7 +26,6 @@ docker run --name mysql-github -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=git
 
 > ⚠️ Lưu ý: Nếu port 3306 đang bận, bạn có thể đổi sang port khác (ví dụ `-p 3307:3306`).
 
----
 
 ## 🐍 Cài đặt Python Environment
 
@@ -48,33 +44,48 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
----
 
-## 🔐 Cấu hình GitHub Token
+## 🔐 Cấu hình GitHub Token và Database
 
-Tạo file `.env` cùng cấp với `hello.py`:
+Tạo một file có tên `.env` trong thư mục gốc của dự án và thêm các dòng sau:
 
 ```
 GITHUB_TOKEN=
+MYSQL_HOST=
+MYSQL_USER=
+MYSQL_PASSWORD=
+MYSQL_DB=
 ```
 
 > 📌 Bạn nên dùng token của riêng mình nếu không muốn giới hạn rate.
 
----
 
 ## 🏃‍♂️ Chạy chương trình
 
 ```bash
-python hello.py
+cd SA_CS5
+uvicorn app.main:app --reload
 ```
 
-Kết quả:
+🔄 Lệnh này sẽ khởi động FastAPI server ở chế độ reload (tự động cập nhật khi thay đổi mã nguồn).
 
-- Reset database
-- Fetch top repo từ GitHub
-- Lưu release & commit tương ứng theo từng release vào DB
 
----
+## 📡 Các API
+Bạn có thể gọi API này bằng:
+- Postman
+- curl
+- Hoặc truy cập Swagger UI tại: http://localhost:8000/docs
+### 📤 API thu thập dữ liệu từ GitHub và lưu vào MySQL.
+- Phương thức: POST
+- Endpoint: `/fetch-github`
+- URL mẫu: `http://127.0.0.1:8000/fetch-github`
+- Mô tả chức năng:
+  + Xoá toàn bộ dữ liệu cũ trong database
+  + Gọi GitHub API để lấy danh sách repository có nhiều sao nhất (stars > 1000)
+  + Lấy thông tin các release và commit tương ứng của từng repo
+  + Lưu toàn bộ vào cơ sở dữ liệu MySQL
+
+
 
 ## 🧪 Kiểm tra database
 
@@ -94,8 +105,6 @@ Password: root
 Database: github_data
 ```
 
----
-
 ## 💬 Ghi chú cho Team
 
 - Docker chi là một lưa chọn.
@@ -103,7 +112,7 @@ Database: github_data
 - Đảm bảo file `.env` được tạo thủ công, không đẩy lên git.
 - Token GitHub có thể thay đổi hoặc hết hạn, bạn tự tạo tại: https://github.com/settings/tokens
 
----
+
 
 ## 🐛 Lỗi thường gặp
 
@@ -116,9 +125,4 @@ Database: github_data
 ---
 
 ## 👥 Người thực hiện
-
-- ✍️ _nhom 1_
-
-```
-
-```
+✍️ _nhom 1_
