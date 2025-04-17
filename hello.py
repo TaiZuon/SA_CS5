@@ -4,13 +4,17 @@ import pymysql
 import os
 from dotenv import load_dotenv
 import logging
+from sidecar.log_writing import setup_logging, log_resource_usage,log_timing
+import time
 
+# Khởi tạo logging
+setup_logging()
 # Load biến môi trường
 load_dotenv()
 
 TOKEN = os.getenv("GITHUB_TOKEN")
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_resource_usage,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
 HEADERS = {
@@ -26,132 +30,166 @@ DB_CONFIG = {
 }
 
 def connect_db():
-    logging.info("Kết nối đến cơ sở dữ liệu...")
+    log_resource_usage("Kết nối đến cơ sở dữ liệu...")
     return pymysql.connect(**DB_CONFIG)
 
 def reset_db():
-    logging.info("Đang reset database...")
+    log_resource_usage("Đang reset database...")
     conn = connect_db()
     cursor = conn.cursor()
     
     try:
         cursor.execute("SET FOREIGN_KEY_CHECKS=0;")
-        logging.info("Đã tắt kiểm tra khóa ngoại.")
+        log_resource_usage("Đã tắt kiểm tra khóa ngoại.")
         cursor.execute("TRUNCATE TABLE `commit`;")
-        logging.info("Đã xóa dữ liệu trong bảng `commit`.")
+        log_resource_usage("Đã xóa dữ liệu trong bảng `commit`.")
         cursor.execute("TRUNCATE TABLE `release`;")
-        logging.info("Đã xóa dữ liệu trong bảng `release`.")
+        log_resource_usage("Đã xóa dữ liệu trong bảng `release`.")
         cursor.execute("TRUNCATE TABLE `repo`;")
-        logging.info("Đã xóa dữ liệu trong bảng `repo`.")
+        log_resource_usage("Đã xóa dữ liệu trong bảng `repo`.")
         cursor.execute("SET FOREIGN_KEY_CHECKS=1;")
-        logging.info("Đã bật lại kiểm tra khóa ngoại.")
+        log_resource_usage("Đã bật lại kiểm tra khóa ngoại.")
         conn.commit()
-        logging.info("✅ Database đã được reset!")
+        log_resource_usage("✅ Database đã được reset!")
     except Exception as e:
         logging.error(f"Lỗi khi reset database: {e}")
     finally:
         cursor.close()
         conn.close()
 
-async def fetch_top_repos(session, per_page=50):
-    logging.info("Đang fetch danh sách top repositories từ GitHub...")
+async def fetch_top_repos(session, per_page=10):
+    start_time = time.time()  # Bắt đầu đo thời gian
+    log_resource_usage("Đang fetch danh sách top repositories từ GitHub...")
     url = f"https://api.github.com/search/repositories?q=stars:>00&sort=stars&per_page={per_page}&page=1"
     async with session.get(url, headers=HEADERS) as response:
         data = await response.json()
-        logging.info(f"Đã fetch được {len(data.get('items', []))} repositories.")
-        return data.get("items", [])
+        repos = data.get("items", [])
+        log_timing("Fetch top repositories", start_time, count=len(repos), unit="repositories")
+        return repos
 
 async def fetch_releases(session, owner, repo):
-    logging.info(f"Đang fetch releases cho repository: {owner}/{repo}...")
+    start_time = time.time()  # Bắt đầu đo thời gian
+    log_resource_usage(f"Đang fetch releases cho repository: {owner}/{repo}...")
     url = f"https://api.github.com/repos/{owner}/{repo}/releases"
     async with session.get(url, headers=HEADERS) as response:
         data = await response.json()
-        logging.info(f"Đã fetch được {len(data) if isinstance(data, list) else 0} releases.")
-        return data if isinstance(data, list) else []
+        releases = data if isinstance(data, list) else []
+        log_timing(f"Fetch releases cho repository: {owner}/{repo}", start_time, count=len(releases), unit="releases")
+        return releases
 
 async def fetch_commits_by_release(session, owner, repo, tag_name):
-    logging.info(f"Đang fetch commits cho release: {tag_name} trong repository: {owner}/{repo}...")
+    start_time = time.time()  # Bắt đầu đo thời gian
+    log_resource_usage(f"Đang fetch commits cho release: {tag_name} trong repository: {owner}/{repo}...")
     url = f"https://api.github.com/repos/{owner}/{repo}/commits?sha={tag_name}&per_page=10"
     async with session.get(url, headers=HEADERS) as response:
         data = await response.json()
-        logging.info(f"Đã fetch được {len(data) if isinstance(data, list) else 0} commits.")
-        return data if isinstance(data, list) else []
+        commits = data if isinstance(data, list) else []
+        log_timing(f"Fetch commits for {owner}/{repo}@{tag_name}", start_time, count=len(commits), unit="commits")
+        return commits
+    
+async def fetch_and_log_repos(session, per_page=10):
+    """
+    Fetch repositories, releases, and commits, đồng thời ghi log tổng hợp và thời gian cho từng repository.
+    """
+    start_time = time.time()  # Bắt đầu đo thời gian tổng
+    repos = await fetch_top_repos(session, per_page=per_page)
+
+    repo_releases = {}
+    release_commits = {}
+    total_releases = 0
+    total_commits = 0
+
+    for repo in repos:
+        repo_start_time = time.time()  # Bắt đầu đo thời gian cho repo này
+        owner, repo_name = repo["owner"]["login"], repo["name"]
+        logging.info(f"🔄 Bắt đầu xử lý repository: {owner}/{repo_name}")
+
+        # Fetch releases
+        releases = await fetch_releases(session, owner, repo_name)
+
+        if releases:
+            repo_releases[repo["id"]] = releases
+            total_releases += len(releases)
+
+            # Fetch commits for each release
+            for release in releases:
+                tag_name = release["tag_name"]
+                commits = await fetch_commits_by_release(session, owner, repo_name, tag_name)
+                release_commits[release["id"]] = commits
+                total_commits += len(commits)
+
+        # Log thời gian xử lý cho repo này
+        repo_elapsed_time = time.time() - repo_start_time
+        logging.info(
+            f"✅ Xử lý repository: {owner}/{repo_name} - Đã fetch được {len(releases)} releases và {len(release_commits.get(release['id'], [])) if releases else 0} commits trong {repo_elapsed_time:.2f} giây."
+        )
+
+    # Log tổng thời gian
+    elapsed_time = time.time() - start_time
+    logging.info(
+        f"Fetch repo: Đã fetch được {len(repos)} repositories, {total_releases} releases, và {total_commits} commits trong {elapsed_time:.2f} giây."
+    )
+    return repos, repo_releases, release_commits
+
 
 def save_to_db(repos, repo_releases, release_commits):
-    logging.info("Đang lưu dữ liệu vào database...")
+    log_resource_usage("Đang lưu dữ liệu vào database...")
     conn = connect_db()
     cursor = conn.cursor()
 
-    try:
-        # Tắt ràng buộc khóa ngoại
-        cursor.execute("SET FOREIGN_KEY_CHECKS=0;")
-        logging.info("Đã tắt kiểm tra khóa ngoại.")
 
         # Lưu dữ liệu vào bảng `release` trước
-        for repo_id, releases in repo_releases.items():
-            for release in releases:
-                release_id = release["id"]
-                tag_name = release["tag_name"]
-                content = release.get("body", "")[:65000]
-                logging.info(f"Lưu release: {tag_name} cho repository ID: {repo_id}...")
-                cursor.execute(
-                    "INSERT INTO `release` (id, content, repoID) VALUES (%s, %s, %s)",
-                    (release_id, content, repo_id)
-                )
-
-        # Lưu dữ liệu vào bảng `repo` sau
-        for repo in repos:
-            logging.info(f"Lưu repository: {repo['name']}...")
+    for repo in repos:
+            log_resource_usage(f"Lưu repository: {repo['name']}...")
             cursor.execute(
                 "INSERT INTO `repo` (id, user, name) VALUES (%s, %s, %s)",
                 (repo["id"], repo["owner"]["login"], repo["name"])
             )
 
-        # Lưu dữ liệu vào bảng `commit`
-        for repo_id, releases in repo_releases.items():
+    for repo_id, releases in repo_releases.items():
+            for release in releases:
+                release_id = release["id"]
+                tag_name = release["tag_name"]
+                content = release.get("body", "")[:65000]
+                log_resource_usage(f"Lưu release: {tag_name} cho repository ID: {repo_id}...")
+                cursor.execute(
+                    "INSERT INTO `release` (id, content, repoID) VALUES (%s, %s, %s)",
+                    (release_id, content, repo_id)
+                )
+
+        
+    for repo_id, releases in repo_releases.items():
             for release in releases:
                 release_id = release["id"]
                 if release_id in release_commits:
                     for commit in release_commits[release_id]:
-                        logging.info(f"Lưu commit: {commit['sha']} cho release ID: {release_id}...")
+                        log_resource_usage(f"Lưu commit: {commit['sha']} cho release ID: {release_id}...")
                         cursor.execute(
                             "INSERT INTO `commit` (hash, message, releaseID) VALUES (%s, %s, %s)",
                             (commit["sha"], commit["commit"]["message"][:1000], release_id)
                         )
 
-        conn.commit()
-        logging.info("✅ Dữ liệu đã lưu vào database!")
+    conn.commit()
+    log_resource_usage("✅ Dữ liệu đã lưu vào database!")
 
-    except Exception as e:
-        logging.error(f"Lỗi khi lưu dữ liệu vào database: {e}")
+    # except Exception as e:
+    #     logging.error(f"Lỗi khi lưu dữ liệu vào database: {e}")
 
-    finally:
-        # Bật lại ràng buộc khóa ngoại
-        cursor.execute("SET FOREIGN_KEY_CHECKS=1;")
-        logging.info("Đã bật lại kiểm tra khóa ngoại.")
-        cursor.close()
-        conn.close()
+    # finally:
+    #     # Bật lại ràng buộc khóa ngoại
+    #     cursor.execute("SET FOREIGN_KEY_CHECKS=1;")
+    #     log_resource_usage("Đã bật lại kiểm tra khóa ngoại.")
+    #     cursor.close()
+    #     conn.close()
 
 async def main():
+    start_time = time.time()  # Bắt đầu đo thời gian tổng
     async with aiohttp.ClientSession() as session:
-        repos = await fetch_top_repos(session, per_page=50)
-        
-        repo_releases = {}
-        release_commits = {}
-
-        for repo in repos:
-            owner, repo_name = repo["owner"]["login"], repo["name"]
-            releases = await fetch_releases(session, owner, repo_name)
-            
-            if releases:
-                repo_releases[repo["id"]] = releases
-                
-                for release in releases:
-                    tag_name = release["tag_name"]
-                    commits = await fetch_commits_by_release(session, owner, repo_name, tag_name)
-                    release_commits[release["id"]] = commits
-        
+        repos, repo_releases, release_commits = await fetch_and_log_repos(session, per_page=10)
         reset_db()
         save_to_db(repos, repo_releases, release_commits)
+    elapsed_time = time.time() - start_time  # Tính thời gian tổng
+    logging.info(f"Chương trình đã hoàn thành trong {elapsed_time:.2f} giây.")
 
 asyncio.run(main())
+log_resource_usage("Tổng mức sử dụng tài nguyên")
