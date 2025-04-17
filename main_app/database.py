@@ -95,3 +95,25 @@ def save_commits_batch(commits, release_id):
         cursor.close()
         conn.close()
 
+def delete_release(release_id):
+    conn = connect_db()
+    cursor = conn.cursor()
+    try:
+        logging.info(f"🗑️ Đang xoá release {release_id} và các commit liên quan...")
+
+        # Xoá commit trước
+        cursor.execute("DELETE FROM `commit` WHERE releaseID = %s", (release_id,))
+        logging.info(f"🧹 Đã xoá commit liên quan đến release {release_id}")
+
+        # Xoá release
+        cursor.execute("DELETE FROM `release` WHERE id = %s", (release_id,))
+        conn.commit()
+
+        logging.info(f"✅ Release {release_id} đã được xoá khỏi DB")
+    except Exception as e:
+        conn.rollback()
+        logging.warning(f"❌ Lỗi khi xoá release {release_id}: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+

@@ -1,8 +1,7 @@
 import aiohttp
 import logging
-import time
 from main_app.config import GITHUB_API_URL
-from sidecar.error_handler import handle_github_error
+from sidecar.error_handler import handle_github_error_with_retry
 
 # Tạo headers dùng chung
 def build_headers(token):
@@ -18,7 +17,9 @@ async def fetch_top_repos(session, token, per_page=50, page=1):
     logging.info(f"🔎 Fetching repos page {page}")
     async with session.get(url, headers=headers) as resp:
         if resp.status != 200:
-            await handle_github_error(resp, token, context=f"repos page {page}")
+            should_abort = await handle_github_error_with_retry(resp, token, context=f"repos page {page}")
+            if should_abort:
+                return None
         return await resp.json()
 
 async def fetch_releases(session, token, owner, repo):
@@ -27,7 +28,9 @@ async def fetch_releases(session, token, owner, repo):
     logging.info(f"📦 Fetching releases for {owner}/{repo}")
     async with session.get(url, headers=headers) as resp:
         if resp.status != 200:
-            await handle_github_error(resp, token, context=f"{owner}/{repo} - releases")
+            should_abort = await handle_github_error_with_retry(resp, token, context=f"{owner}/{repo} - releases")
+            if should_abort:
+                return None
         return await resp.json()
 
 async def fetch_commits_between_tags(session, token, owner, repo, base_tag, head_tag):
@@ -38,7 +41,9 @@ async def fetch_commits_between_tags(session, token, owner, repo, base_tag, head
             data = await resp.json()
             return data.get("commits", [])
         else:
-            await handle_github_error(resp, token, context=f"{owner}/{repo} - compare {base_tag}...{head_tag}")
+            should_abort = await handle_github_error_with_retry(resp, token, context=f"{owner}/{repo} - compare {base_tag}...{head_tag}")
+            if should_abort:
+                return None
             return []
 
 async def fetch_commits_by_tag(session, token, owner, repo, tag_name):
@@ -47,7 +52,9 @@ async def fetch_commits_by_tag(session, token, owner, repo, tag_name):
     logging.info(f"📜 Fetching commits for {owner}/{repo} (tag: {tag_name})")
     async with session.get(url, headers=headers) as resp:
         if resp.status != 200:
-            await handle_github_error(resp, token, context=f"{owner}/{repo}@{tag_name}")
+            should_abort = await handle_github_error_with_retry(resp, token, context=f"{owner}/{repo}@{tag_name}")
+            if should_abort:
+                return None
         return await resp.json()
 
 async def fetch_all_commits_by_tag(session, token, owner, repo, tag_name):
@@ -61,8 +68,9 @@ async def fetch_all_commits_by_tag(session, token, owner, repo, tag_name):
         logging.info(f"📜 Fetching commits page {page} for {owner}/{repo}@{tag_name}")
         async with session.get(url, headers=headers) as resp:
             if resp.status != 200:
-                await handle_github_error(resp, token, context=f"{owner}/{repo}@{tag_name} - page {page}")
-                break
+                should_abort = await handle_github_error_with_retry(resp, token, context=f"{owner}/{repo}@{tag_name} - page {page}")
+                if should_abort:
+                    break
 
             commits = await resp.json()
             if not commits or not isinstance(commits, list):

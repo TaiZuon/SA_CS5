@@ -36,3 +36,9 @@ def is_token_cooldown(token: str) -> bool:
     Trả về True nếu token đang cooldown.
     """
     return time.time() < cooldown_map.get(token, 0)
+
+def wait_until_next_available_token():
+    soonest_time = min(cooldown_map.values(), default=0)
+    now = time.time()
+    wait_time = max(soonest_time - now, 0)
+    return wait_time
