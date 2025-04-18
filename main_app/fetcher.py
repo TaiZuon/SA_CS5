@@ -1,9 +1,7 @@
-import aiohttp
 import logging
 from main_app.config import GITHUB_API_URL, GITSTAR_RANKING_URL
-from sidecar.error_handler import handle_github_error_with_retry
 from bs4 import BeautifulSoup
-
+from sidecar.error_handler import handle_github_error
 # Biến đếm số lần fetch
 fetch_counters = {
     "repos": 0,
@@ -17,7 +15,7 @@ def build_headers(token):
     return {
         "Authorization": f"token {token}",
         "Accept": "application/vnd.github+json",
-        "User-Agent": "de bo phet cho 0.0.1"
+        "User-Agent": "RepoFetcher 0.0.1"
     }
 
 async def fetch_top_repos(session, page):
@@ -58,7 +56,7 @@ async def fetch_releases(session, token, owner, repo):
     logging.info(f"📦 Fetching releases for {owner}/{repo} (Releases Fetch #{fetch_counters['releases']})")
     async with session.get(url, headers=headers) as resp:
         if resp.status != 200:
-            should_abort = await handle_github_error_with_retry(resp, token, context=f"{owner}/{repo} - releases")
+            should_abort = await handle_github_error(resp, token, context=f"{owner}/{repo} - releases")
             if should_abort:
                 return None
         return await resp.json()
@@ -75,7 +73,7 @@ async def fetch_commits_between_tags(session, token, owner, repo, base_tag, head
             data = await resp.json()
             return data.get("commits", [])
         else:
-            should_abort = await handle_github_error_with_retry(resp, token, context=f"{owner}/{repo} - compare {base_tag}...{head_tag}")
+            should_abort = await handle_github_error(resp, token, context=f"{owner}/{repo} - compare {base_tag}...{head_tag}")
             if should_abort:
                 return None
             return []
@@ -94,7 +92,7 @@ async def fetch_all_commits_by_tag(session, token, owner, repo, tag_name):
 
         async with session.get(url, headers=headers) as resp:
             if resp.status != 200:
-                should_abort = await handle_github_error_with_retry(resp, token, context=f"{owner}/{repo}@{tag_name} - page {page}")
+                should_abort = await handle_github_error(resp, token, context=f"{owner}/{repo}@{tag_name} - page {page}")
                 if should_abort:
                     break
 

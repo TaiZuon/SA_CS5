@@ -1,12 +1,14 @@
 import logging
 import asyncio
+import time
 from prometheus_client import Summary
 from main_app.fetcher import (
     fetch_top_repos, fetch_releases,
     fetch_all_commits_by_tag, fetch_commits_between_tags
 )
-from main_app.database import save_repo, save_release, save_commit, save_commits_batch, delete_release
+from sidecar.log_writing import log_timing, log_resource_usage
 from sidecar.error_handler import safe_request
+from main_app.database import connect_db
 
 # Metric Prometheus để đo thời gian xử lý 1 repo
 process_time = Summary('repo_process_seconds', 'Time spent processing a repo')
@@ -24,27 +26,47 @@ async def process_repo(session, repo, idx):
     repo_name = repo["name"]
     repo_id = repo["id"]
 
-    logging.info(f"🚀 Processing repo #{idx}: {owner}/{repo_name}")
-    try:
-        # Lấy release
-        releases = await safe_request(lambda token: fetch_releases(session, token, owner, repo_name), context=f"{owner}/{repo_name} - releases")
-        if not releases:
-            logging.info(f"⛔ Repo {owner}/{repo_name} không có release. Bỏ qua.")
-            return
+    logging.info(f"🚀 Đang xử lý repo #{idx}: {owner}/{repo_name}")
+    start_time = time.time()
+    MAX_RETRIES = 3
 
-        releases.sort(key=lambda r: r.get("published_at") or "", reverse=False)
-        prev_tag = None
-        save_repo(repo)
+    for attempt in range(1, MAX_RETRIES + 1):
+        conn = connect_db()
+        cursor = conn.cursor()
+        try:
+            conn.begin()
+            releases = await safe_request(
+                lambda token: fetch_releases(session, token, owner, repo_name),
+                context=f"{owner}/{repo_name} - releases"
+            )
 
-        for release in releases:
-            release_id = release["id"]
-            tag_name = release.get("tag_name", "")
+            if not releases:
+                logging.info(f"⛔ Repo {owner}/{repo_name} không có release. Bỏ qua.")
+                return
 
-            save_release(release, repo_id)
-            if not tag_name:
-                continue
+            releases.sort(key=lambda r: r.get("published_at") or "", reverse=False)
+            prev_tag = None
 
-            try:
+            # Save repo
+            cursor.execute(
+                "INSERT INTO `repo` (id, user, name) VALUES (%s, %s, %s)",
+                (repo["id"], repo["owner"]["login"], repo["name"])
+            )
+
+            for release in releases:
+                release_id = release["id"]
+                tag_name = release.get("tag_name", "")
+
+                # Save release
+                cursor.execute(
+                    "INSERT INTO `release` (id, content, repoID) VALUES (%s, %s, %s)",
+                    (release_id, release.get("body", "")[:65000], repo_id)
+                )
+
+                if not tag_name:
+                    continue
+
+                # Fetch commits
                 if prev_tag:
                     commits = await safe_request(
                         lambda token: fetch_commits_between_tags(session, token, owner, repo_name, prev_tag, tag_name),
@@ -55,17 +77,36 @@ async def process_repo(session, repo, idx):
                         lambda token: fetch_all_commits_by_tag(session, token, owner, repo_name, tag_name),
                         context=f"{owner}/{repo_name}@{tag_name}"
                     )
-                save_commits_batch(commits, release_id)
 
-            except Exception as e:
-                logging.warning(f"❌ Lỗi khi fetch commit cho {owner}/{repo_name}@{tag_name}: {e}. Rollback release.")
-                delete_release(release_id)  # rollback
-                break  # dừng hẳn nếu 1 release fail
+                # Save commits
+                commit_data = [
+                    (commit["sha"], commit["commit"]["message"][:1000], release_id)
+                    for commit in commits
+                ]
+                cursor.executemany(
+                    "INSERT INTO `commit` (hash, message, releaseID) VALUES (%s, %s, %s)",
+                    commit_data
+                )
 
-            prev_tag = tag_name
+                prev_tag = tag_name
 
-    except Exception as e:
-        logging.exception(f"🔥 Lỗi nghiêm trọng khi xử lý repo {repo['full_name']}: {e}")
+            conn.commit()
+            logging.info(f"✅ Repo {owner}/{repo_name} xử lý thành công (attempt {attempt})")
+            log_timing("Process Repo", start_time, unit="releases", count=len(releases))
+            log_resource_usage(f"Repo {owner}/{repo_name}")
+            return
+
+        except Exception as e:
+            conn.rollback()
+            logging.warning(f"⚠️ Attempt {attempt}/{MAX_RETRIES} failed for {owner}/{repo_name}: {e}")
+            if attempt < MAX_RETRIES:
+                logging.info("🔁 Thử lại sau 2s...")
+                await asyncio.sleep(2)
+            else:
+                logging.error(f"⛔ Bỏ qua repo {owner}/{repo_name} sau {MAX_RETRIES} lần thử.")
+        finally:
+            cursor.close()
+            conn.close()
 
 async def collect_data(session):
     page_count = 50   # Tổng số trang cần thu thập dữ liệu
@@ -87,6 +128,7 @@ async def collect_data(session):
 
         # Log số lượng repository đã thu thập được từ trang hiện tại
         logging.info(f"📦 Page {page}: {len(items)} repos")
-        
+
         tasks = [limited_process_repo(session, repo, repo["id"]) for repo in items]
+
         await asyncio.gather(*tasks)
