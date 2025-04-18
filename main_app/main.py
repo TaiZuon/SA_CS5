@@ -5,8 +5,9 @@ from main_app import config
 from main_app.database import reset_db
 from main_app.controller import collect_data
 from prometheus_client import start_http_server
+from sidecar.log_writing import setup_logging
 
-logging.basicConfig(**config.LOGGING_CONFIG)
+setup_logging()
 
 async def main():
     start_http_server(8000)
