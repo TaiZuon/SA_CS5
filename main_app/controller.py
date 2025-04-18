@@ -3,7 +3,7 @@ import asyncio
 import time
 from prometheus_client import Summary
 from main_app.fetcher import (
-    fetch_top_repos, fetch_releases, fetch_commits_by_tag,
+    fetch_top_repos, fetch_releases,
     fetch_all_commits_by_tag, fetch_commits_between_tags
 )
 from sidecar.log_writing import log_timing, log_resource_usage
@@ -109,23 +109,26 @@ async def process_repo(session, repo, idx):
             conn.close()
 
 async def collect_data(session):
-    page_count = 50
-    per_page = 100
+    page_count = 50   # Tổng số trang cần thu thập dữ liệu
 
     for page in range(1, page_count + 1):
         try:
-            repos_data = await safe_request(
-                lambda token: fetch_top_repos(session, token, page=page, per_page=per_page),
-                context=f"repos page {page}"
-            )
-            items = repos_data.get("items", [])
+            # Lấy dữ liệu repos từ hàm fetch_top_repos
+            repos_data = await fetch_top_repos(session, page=page)
+
+            if not repos_data:
+                logging.warning(f"❌ Không có dữ liệu từ page {page}")
+                continue
+
+            items = repos_data  # Dữ liệu repo từ trang hiện tại
+
         except Exception as e:
             logging.warning(f"❌ Bỏ qua page {page} vì lỗi: {e}")
             continue
 
+        # Log số lượng repository đã thu thập được từ trang hiện tại
         logging.info(f"📦 Page {page}: {len(items)} repos")
-        tasks = [
-            limited_process_repo(session, repo, idx)
-            for idx, repo in enumerate(items, start=1 + (page - 1) * per_page)
-        ]
+
+        tasks = [limited_process_repo(session, repo, repo["id"]) for repo in items]
+
         await asyncio.gather(*tasks)
