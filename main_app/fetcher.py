@@ -1,7 +1,16 @@
 import aiohttp
 import logging
-from main_app.config import GITHUB_API_URL
+from main_app.config import GITHUB_API_URL, GITSTAR_RANKING_URL
 from sidecar.error_handler import handle_github_error_with_retry
+from bs4 import BeautifulSoup
+
+# Biến đếm số lần fetch
+fetch_counters = {
+    "repos": 0,
+    "releases": 0,
+    "compare": 0,
+    "commits": 0
+}
 
 # Tạo headers dùng chung
 def build_headers(token):
@@ -11,21 +20,42 @@ def build_headers(token):
         "User-Agent": "de bo phet cho 0.0.1"
     }
 
-async def fetch_top_repos(session, token, per_page=50, page=1):
-    headers = build_headers(token)
-    url = f"{GITHUB_API_URL}/search/repositories?q=stars:>0&sort=stars&per_page={per_page}&page={page}"
-    logging.info(f"🔎 Fetching repos page {page}")
-    async with session.get(url, headers=headers) as resp:
-        if resp.status != 200:
-            should_abort = await handle_github_error_with_retry(resp, token, context=f"repos page {page}")
-            if should_abort:
-                return None
-        return await resp.json()
+async def fetch_top_repos(session, page):
+    items = []  # Mảng chứa các repository
+    fetch_counters["repos"] += 1  # Đếm số lần fetch repo
+
+    url = f"{GITSTAR_RANKING_URL}/repositories?page={page}"
+    logging.info(f"🔎 Fetching repos page {page} (Repos Fetch #{fetch_counters['repos']})")
+
+    async with session.get(url) as resp:
+        html = await resp.text()
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        # Duyệt qua từng phần tử a.list-group-item.paginated_item trong HTML
+        for idx, a in enumerate(soup.select("a.list-group-item.paginated_item"), start=1):
+            href = a["href"].strip("/")
+            user, name = href.split("/")  # Tách đường dẫn thành user và repo_name
+
+            repo_id = (page - 1) * 100 + idx  # ID tăng dần theo trang và vị trí
+
+            # Tạo đối tượng repo
+            repo = {
+                "owner": {"login": user},
+                "name": name,
+                "id": repo_id
+            }
+
+            items.append(repo)
+
+    return items
 
 async def fetch_releases(session, token, owner, repo):
+    fetch_counters["releases"] += 1
+
     headers = build_headers(token)
     url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases"
-    logging.info(f"📦 Fetching releases for {owner}/{repo}")
+    logging.info(f"📦 Fetching releases for {owner}/{repo} (Releases Fetch #{fetch_counters['releases']})")
     async with session.get(url, headers=headers) as resp:
         if resp.status != 200:
             should_abort = await handle_github_error_with_retry(resp, token, context=f"{owner}/{repo} - releases")
@@ -34,8 +64,12 @@ async def fetch_releases(session, token, owner, repo):
         return await resp.json()
 
 async def fetch_commits_between_tags(session, token, owner, repo, base_tag, head_tag):
+    fetch_counters["compare"] += 1
+
     headers = build_headers(token)
     url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/compare/{base_tag}...{head_tag}"
+    logging.info(f"🔀 Comparing tags {base_tag}...{head_tag} for {owner}/{repo} (Compare Fetch #{fetch_counters['compare']})")
+
     async with session.get(url, headers=headers) as resp:
         if resp.status == 200:
             data = await resp.json()
@@ -46,17 +80,6 @@ async def fetch_commits_between_tags(session, token, owner, repo, base_tag, head
                 return None
             return []
 
-async def fetch_commits_by_tag(session, token, owner, repo, tag_name):
-    headers = build_headers(token)
-    url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/commits?sha={tag_name}&per_page=10"
-    logging.info(f"📜 Fetching commits for {owner}/{repo} (tag: {tag_name})")
-    async with session.get(url, headers=headers) as resp:
-        if resp.status != 200:
-            should_abort = await handle_github_error_with_retry(resp, token, context=f"{owner}/{repo}@{tag_name}")
-            if should_abort:
-                return None
-        return await resp.json()
-
 async def fetch_all_commits_by_tag(session, token, owner, repo, tag_name):
     headers = build_headers(token)
     all_commits = []
@@ -64,8 +87,11 @@ async def fetch_all_commits_by_tag(session, token, owner, repo, tag_name):
     per_page = 100
 
     while True:
+        fetch_counters["commits"] += 1
+
         url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/commits?sha={tag_name}&per_page={per_page}&page={page}"
-        logging.info(f"📜 Fetching commits page {page} for {owner}/{repo}@{tag_name}")
+        logging.info(f"📜 Fetching commits page {page} for {owner}/{repo}@{tag_name} (Commits Fetch #{fetch_counters['commits']})")
+
         async with session.get(url, headers=headers) as resp:
             if resp.status != 200:
                 should_abort = await handle_github_error_with_retry(resp, token, context=f"{owner}/{repo}@{tag_name} - page {page}")

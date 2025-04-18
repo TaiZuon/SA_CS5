@@ -5,6 +5,7 @@ load_dotenv()
 
 GITHUB_TOKENS = os.getenv("GITHUB_TOKENS", "").split(",")
 GITHUB_API_URL = "https://api.github.com"
+GITSTAR_RANKING_URL = "https://gitstar-ranking.com"
 
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "localhost"),
