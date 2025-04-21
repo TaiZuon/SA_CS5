@@ -4,7 +4,7 @@ import pymysql
 import os
 from dotenv import load_dotenv
 import logging
-from sidecar.log_writing import setup_logging, log_resource_usage,log_timing
+from sidecar.log_writing import *
 import time
 
 # Khởi tạo logging
@@ -89,7 +89,7 @@ async def fetch_commits_by_release(session, owner, repo, tag_name):
     
 async def fetch_and_log_repos(session, per_page=10):
     """
-    Fetch repositories, releases, and commits, đồng thời ghi log tổng hợp và thời gian cho từng repository.
+    Fetch repositories, releases, và commits, đồng thời ghi log tổng hợp và thời gian cho từng repository.
     """
     start_time = time.time()  # Bắt đầu đo thời gian tổng
     repos = await fetch_top_repos(session, per_page=per_page)
@@ -99,13 +99,21 @@ async def fetch_and_log_repos(session, per_page=10):
     total_releases = 0
     total_commits = 0
 
+    # Thêm biến để tính tổng thời gian
+    total_repo_time = 0
+    total_release_time = 0
+    total_commit_time = 0
+
     for repo in repos:
         repo_start_time = time.time()  # Bắt đầu đo thời gian cho repo này
         owner, repo_name = repo["owner"]["login"], repo["name"]
         logging.info(f"🔄 Bắt đầu xử lý repository: {owner}/{repo_name}")
 
         # Fetch releases
+        release_start_time = time.time()
         releases = await fetch_releases(session, owner, repo_name)
+        release_elapsed_time = time.time() - release_start_time
+        total_release_time += release_elapsed_time
 
         if releases:
             repo_releases[repo["id"]] = releases
@@ -113,13 +121,18 @@ async def fetch_and_log_repos(session, per_page=10):
 
             # Fetch commits for each release
             for release in releases:
+                commit_start_time = time.time()
                 tag_name = release["tag_name"]
                 commits = await fetch_commits_by_release(session, owner, repo_name, tag_name)
+                commit_elapsed_time = time.time() - commit_start_time
+                total_commit_time += commit_elapsed_time
+
                 release_commits[release["id"]] = commits
                 total_commits += len(commits)
 
         # Log thời gian xử lý cho repo này
         repo_elapsed_time = time.time() - repo_start_time
+        total_repo_time += repo_elapsed_time
         logging.info(
             f"✅ Xử lý repository: {owner}/{repo_name} - Đã fetch được {len(releases)} releases và {len(release_commits.get(release['id'], [])) if releases else 0} commits trong {repo_elapsed_time:.2f} giây."
         )
@@ -129,9 +142,15 @@ async def fetch_and_log_repos(session, per_page=10):
     logging.info(
         f"Fetch repo: Đã fetch được {len(repos)} repositories, {total_releases} releases, và {total_commits} commits trong {elapsed_time:.2f} giây."
     )
-    return repos, repo_releases, release_commits
 
+    # Tính thời gian trung bình
+    avg_repo_time = total_repo_time / len(repos) if repos else 0
+    avg_release_time = total_release_time / total_releases if total_releases else 0
+    avg_commit_time = total_commit_time / total_commits if total_commits else 0
 
+    
+
+    return repos, repo_releases, release_commits, avg_repo_time, avg_release_time, avg_commit_time
 def save_to_db(repos, repo_releases, release_commits):
     log_resource_usage("Đang lưu dữ liệu vào database...")
     conn = connect_db()
@@ -185,11 +204,32 @@ def save_to_db(repos, repo_releases, release_commits):
 async def main():
     start_time = time.time()  # Bắt đầu đo thời gian tổng
     async with aiohttp.ClientSession() as session:
-        repos, repo_releases, release_commits = await fetch_and_log_repos(session, per_page=10)
-        reset_db()
-        save_to_db(repos, repo_releases, release_commits)
+        # Chạy task theo dõi tài nguyên song song với chương trình chính
+        tracking_task = asyncio.create_task(track_resource_usage())
+        try:
+            repos, repo_releases, release_commits, avg_repo_time, avg_release_time, avg_commit_time = await fetch_and_log_repos(session, per_page=50)
+            reset_db()
+            save_to_db(repos, repo_releases, release_commits)
+        finally:
+            tracking_task.cancel()  # Dừng task theo dõi khi chương trình chính hoàn thành
+            try:
+                await tracking_task
+            except asyncio.CancelledError:
+                pass
+
     elapsed_time = time.time() - start_time  # Tính thời gian tổng
     logging.info(f"Chương trình đã hoàn thành trong {elapsed_time:.2f} giây.")
 
+    # Ghi log thời gian trung bình ở cuối file log
+    logging.info(f"Thời gian trung bình fetch repository: {avg_repo_time:.2f} giây.")
+    logging.info(f"Thời gian trung bình fetch release: {avg_release_time:.2f} giây.")
+    logging.info(f"Thời gian trung bình fetch commit: {avg_commit_time:.2f} giây.")
+
+    # Vẽ đồ thị
+    from sidecar.log_writing import plot_metrics
+    plot_metrics()
+
 asyncio.run(main())
 log_resource_usage("Tổng mức sử dụng tài nguyên")
+
+
