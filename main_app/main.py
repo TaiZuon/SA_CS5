@@ -20,4 +20,4 @@ if __name__ == "__main__":
     start = time.time()
 
     asyncio.run(main())
-    print(f"⏱️ Tổng thời gian: {time.time() - start:.2f} giây")
+    logging.info(f"⏱️ Tổng thời gian: {time.time() - start:.2f} giây")

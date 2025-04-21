@@ -32,9 +32,9 @@ def save_repo(repo):
             (repo["id"], repo["owner"]["login"], repo["name"])
         )
         conn.commit()
-        logging.info(f"✅ Saved repo: {repo['full_name']}")
+        logging.info(f"✅ Saved repo: {repo['name']}")
     except Exception as e:
-        logging.warning(f"⚠️ Lỗi khi lưu repo {repo['full_name']}: {e}")
+        logging.warning(f"⚠️ Lỗi khi lưu repo {repo['name']}: {e}")
     finally:
         cursor.close()
         conn.close()

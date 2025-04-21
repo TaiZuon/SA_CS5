@@ -46,6 +46,7 @@ async def fetch_top_repos(session, page):
 
             items.append(repo)
 
+            #logging.info(f"✅ Found repo: {user}/{name} (ID: {repo_id})")
     return items
 
 async def fetch_releases(session, token, owner, repo):

@@ -3,7 +3,7 @@ import time
 import asyncio
 from sidecar.token_rotator import mark_token_cooldown, get_valid_token, wait_until_next_available_token
 
-MAX_RETRY = 1  # Retry nội bộ 1 lần, controller chịu trách nhiệm retry toàn cục
+MAX_RETRY = 2  # Retry nội bộ 1 lần, controller chịu trách nhiệm retry toàn cục
 RETRY_DELAY = 2  # giây
 
 async def handle_github_error(resp, token, context=""):
@@ -44,26 +44,36 @@ async def handle_github_error(resp, token, context=""):
         return False
 
 async def safe_request(fetch_func, context=""):
-    """
-    Gọi fetch_func(token) và xử lý lỗi GitHub API. 
-    Tự xoay token và retry tối đa 1 lần nếu cần.
-    """
     retries = 0
+
     while retries < MAX_RETRY:
+        token = get_valid_token()
         try:
-            token = get_valid_token()
-            result = await fetch_func(token)
-            if result is not None:
-                return result
+            resp = await fetch_func(token)
+
+            # Nếu fetch_func trả về response HTTP, kiểm tra lỗi
+            if hasattr(resp, 'status') and resp.status >= 400:
+                should_skip = await handle_github_error(resp, token, context)
+                if should_skip:
+                    return None  # Bỏ qua repo này
+                else:
+                    retries += 1
+                    logging.info(f"🔁 Retry {retries}/{MAX_RETRY} ({context})")
+                    await asyncio.sleep(RETRY_DELAY)
+                    continue
+
+            # Nếu không phải response (fetch_func tự xử lý và trả về JSON chẳng hạn)
+            if resp is not None:
+                return resp
+
         except Exception as e:
             logging.warning(f"⚠️ Request lỗi ({context}): {e}")
-        retries += 1
-        logging.info(f"🔁 Retry {retries}/{MAX_RETRY} ({context})")
-        await asyncio.sleep(RETRY_DELAY)
+            retries += 1
+            logging.info(f"🔁 Retry {retries}/{MAX_RETRY} ({context})")
+            await asyncio.sleep(RETRY_DELAY)
 
-        if retries == MAX_RETRY:
-            wait_time = wait_until_next_available_token()
-            logging.warning(f"⏸ Đợi {wait_time:.1f}s do hết token khả dụng ({context})")
-            await asyncio.sleep(wait_time)
+    wait_time = wait_until_next_available_token()
+    logging.warning(f"⏸ Đợi {wait_time:.1f}s do hết token khả dụng ({context})")
+    await asyncio.sleep(wait_time)
 
     raise Exception(f"❌ Request thất bại sau {MAX_RETRY} lần ({context})")
