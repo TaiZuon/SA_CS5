@@ -1,10 +1,11 @@
 import logging
 import time
 import asyncio
-from sidecar.token_rotator import mark_token_cooldown, get_valid_token, wait_until_next_available_token
+from main_app.token_rotator import mark_token_cooldown, get_valid_token, wait_until_next_available_token
+from sidecar.metric_server import ERROR_COUNT
 
-MAX_RETRY = 2  # Retry nội bộ 1 lần, controller chịu trách nhiệm retry toàn cục
-RETRY_DELAY = 2  # giây
+MAX_RETRY = 5
+RETRY_DELAY = 2  
 
 async def handle_github_error(resp, token, context=""):
     """
@@ -25,24 +26,27 @@ async def handle_github_error(resp, token, context=""):
         reset_ts = int(time.time()) + 60
         reset_info = "Không rõ thời gian reset"
 
-    if status == 403:
-        logging.warning(f"⚠️ 403 Forbidden tại {context}: {message}. Token {token[:8]}... cooldown. {reset_info}")
-        mark_token_cooldown(token, reset_ts)
-        return True
-    elif status == 401:
-        logging.warning(f"❌ 401 Unauthorized tại {context}: Token {token[:8]}... không hợp lệ hoặc hết hạn.")
-        mark_token_cooldown(token, reset_ts)
-        return True
-    elif status == 422:
-        logging.warning(f"⚠️ 422 Unprocessable Entity tại {context}: {message}")
-        return False
-    elif 500 <= status < 600:
-        logging.warning(f"🔥 Lỗi server {status} tại {context}: {message}")
-        return False
-    else:
-        logging.warning(f"⚠️ Lỗi {status} tại {context}: {message}")
-        return False
+    ERROR_COUNT.inc()  # Tăng mỗi lần gặp lỗi
 
+    match status:
+        case 403:
+            logging.warning(f"⚠️ 403 Forbidden tại {context}: {message}. Token {token[:8]}... cooldown. {reset_info}")
+            mark_token_cooldown(token, reset_ts)
+            return False
+        case 401:
+            logging.warning(f"❌ 401 Unauthorized tại {context}: Token {token[:8]}... không hợp lệ hoặc hết hạn.")
+            mark_token_cooldown(token, reset_ts)
+            return False
+        case 422:
+            logging.warning(f"⚠️ 422 Unprocessable Entity tại {context}: {message}")
+            return True  # lỗi nghiêm trọng, bỏ qua request
+        case status if 500 <= status < 600:
+            logging.warning(f"🔥 Lỗi server {status} tại {context}: {message}")
+            return False  # server error, có thể retry
+        case _:
+            logging.warning(f"⚠️ Lỗi {status} tại {context}: {message}")
+            return True  # mặc định bỏ qua request
+        
 async def safe_request(fetch_func, context=""):
     retries = 0
 

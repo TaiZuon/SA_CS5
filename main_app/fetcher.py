@@ -1,7 +1,7 @@
 import logging
 from main_app.config import GITHUB_API_URL, GITSTAR_RANKING_URL
 from bs4 import BeautifulSoup
-from sidecar.error_handler import handle_github_error
+from main_app.error_handler import handle_github_error
 # Biến đếm số lần fetch
 fetch_counters = {
     "repos": 0,
@@ -56,10 +56,6 @@ async def fetch_releases(session, token, owner, repo):
     url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases"
     logging.info(f"📦 Fetching releases for {owner}/{repo} (Releases Fetch #{fetch_counters['releases']})")
     async with session.get(url, headers=headers) as resp:
-        if resp.status != 200:
-            should_abort = await handle_github_error(resp, token, context=f"{owner}/{repo} - releases")
-            if should_abort:
-                return None
         return await resp.json()
 
 async def fetch_commits_between_tags(session, token, owner, repo, base_tag, head_tag):
@@ -70,14 +66,8 @@ async def fetch_commits_between_tags(session, token, owner, repo, base_tag, head
     logging.info(f"🔀 Comparing tags {base_tag}...{head_tag} for {owner}/{repo} (Compare Fetch #{fetch_counters['compare']})")
 
     async with session.get(url, headers=headers) as resp:
-        if resp.status == 200:
-            data = await resp.json()
-            return data.get("commits", [])
-        else:
-            should_abort = await handle_github_error(resp, token, context=f"{owner}/{repo} - compare {base_tag}...{head_tag}")
-            if should_abort:
-                return None
-            return []
+        data = await resp.json()
+        return data.get("commits", [])
 
 async def fetch_all_commits_by_tag(session, token, owner, repo, tag_name):
     headers = build_headers(token)
@@ -92,11 +82,6 @@ async def fetch_all_commits_by_tag(session, token, owner, repo, tag_name):
         logging.info(f"📜 Fetching commits page {page} for {owner}/{repo}@{tag_name} (Commits Fetch #{fetch_counters['commits']})")
 
         async with session.get(url, headers=headers) as resp:
-            if resp.status != 200:
-                should_abort = await handle_github_error(resp, token, context=f"{owner}/{repo}@{tag_name} - page {page}")
-                if should_abort:
-                    break
-
             commits = await resp.json()
             if not commits or not isinstance(commits, list):
                 break

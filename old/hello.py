@@ -231,5 +231,3 @@ async def main():
 
 asyncio.run(main())
 log_resource_usage("Tổng mức sử dụng tài nguyên")
-
-

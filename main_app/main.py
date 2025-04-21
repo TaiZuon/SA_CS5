@@ -1,23 +1,24 @@
 import asyncio
 import aiohttp
 import logging
-from main_app import config
 from main_app.database import reset_db
-from main_app.controller import collect_data
-from prometheus_client import start_http_server
+from main_app.process import collect_data
 from sidecar.log_writing import setup_logging
+from sidecar.metric_server import start_metrics_server 
 
 setup_logging()
 
 async def main():
-    start_http_server(8000)
     reset_db()
+
+    asyncio.create_task(start_metrics_server(port=8000, update_interval=5))
+
     async with aiohttp.ClientSession() as session:
         await collect_data(session)
 
 if __name__ == "__main__":
     import time
     start = time.time()
-
+    logging.info("🌐 Bắt đầu chương trình...")
     asyncio.run(main())
     logging.info(f"⏱️ Tổng thời gian: {time.time() - start:.2f} giây")
