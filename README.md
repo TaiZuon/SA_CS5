@@ -1,124 +1,130 @@
-# 📦 Github Data Collector
+# GitHub Data Collector
 
-Dự án thu thập thông tin các repo nổi bật từ GitHub (stars > 1000), lưu release và commit tương ứng vào MySQL.
+## Thông tin nhóm
 
-## ✅ Mục tiêu
-
-- Thu thập top repo có nhiều sao nhất trên GitHub
-- Lưu thông tin release và commit vào MySQL
-- Hỗ trợ làm việc nhóm thông qua Docker hoặc setup local
-
----
-
-## ⚙️ Yêu cầu hệ thống
-
-- Python 3.10+
-- Docker (tuỳ chọn)
-- Git
-- Hệ điều hành: Windows / macOS / Linux
+- **Nhóm**: 1
+- **Lớp học phần**: INT3105 1
+- **Sinh viên**:
+  - Thân Việt Anh - 22026503
+  - Ngô Quốc An - 22026515
+  - Nguyễn Thái Dương - 22026533
 
 ---
 
-## 🐳 Cài đặt MySQL bằng Docker (khuyên dùng)
+## Mô tả dự án
 
-### Chạy nhanh bằng lệnh `docker run`
+Hệ thống thu thập dữ liệu từ GitHub bao gồm thông tin repository, release và commit của top 5000 repo theo Gitstar Ranking. Hệ thống hỗ trợ:
 
-```bash
-docker run --name mysql-github -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=github_data -p 3306:3306 -d mysql:8.0
-```
+- Fetch dữ liệu theo thứ tự: repo → release → commit
+- Sử dụng API `/compare/{base}...{head}` để lấy commit giữa hai release
+- Ghi log thời gian, tài nguyên, trạng thái xử lý
+- Có thể lưu dữ liệu vào database hoặc xuất thành file SQL
+- Hỗ trợ retry, cooldown token, theo dõi metric qua Prometheus
 
-> ⚠️ Lưu ý: Nếu port 3306 đang bận, bạn có thể đổi sang port khác (ví dụ `-p 3307:3306`).
+# Hướng Dẫn Cài Đặt và Chạy Chương Trình
+
+## I. Set up
+
+### 1. Cài Đặt Cơ Sở Dữ Liệu (MySQL)
+
+1. Cài đặt MySQL (nếu chưa cài đặt).
+2. Tạo cơ sở dữ liệu và nhập schema từ file `db.sql`:
+   ```bash
+   mysql -u root -p < db.sql
+   ```
+
+### 2. Cài Đặt Python
+
+1. Cài đặt Python 3.10 trở lên từ [Python official site](https://www.python.org/downloads/).
+2. Cài đặt và sử dụng `venv` để tạo môi trường ảo (virtual environment):
+   - Trên **macOS/Linux**:
+     ```bash
+     python3.10 -m venv venv
+     source venv/bin/activate
+     ```
+   - Trên **Windows**:
+     ```bash
+     python3.10 -m venv venv
+     .\venv\Scripts\activate
+     ```
+3. Cài đặt các phụ thuộc:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+### 6. Cài Đặt Prometheus
+
+#### Trên **macOS/Linux**:
+
+1. Tải Prometheus từ [trang chính của Prometheus](https://prometheus.io/download/).
+   ```bash
+   # Ví dụ cho macOS/Linux (tùy theo hệ điều hành, có thể thay đổi link tải)
+   wget https://github.com/prometheus/prometheus/releases/download/v2.29.1/prometheus-2.29.1.darwin-amd64.tar.gz
+   tar -xvzf prometheus-2.29.1.darwin-amd64.tar.gz
+   cd prometheus-2.29.1.darwin-amd64
+   ```
+2. Cấu hình `prometheus.yml` như sau:
+   ```yaml
+   scrape_configs:
+     - job_name: "python_app"
+       static_configs:
+         - targets: ["localhost:8000"]
+   ```
+3. Chạy Prometheus:
+   ```bash
+   ./prometheus --config.file=prometheus.yml
+   ```
+
+#### Trên **Windows**:
+
+1. Tải Prometheus từ [trang chính của Prometheus](https://prometheus.io/download/).
+   - Giải nén file và di chuyển đến thư mục chứa file `prometheus.exe`.
+2. Cấu hình `prometheus.yml` như sau:
+   ```yaml
+   scrape_configs:
+     - job_name: "python_app"
+       static_configs:
+         - targets: ["localhost:8000"]
+   ```
+3. Chạy Prometheus:
+   - Mở Command Prompt và di chuyển đến thư mục chứa file `prometheus.exe`:
+     ```cmd
+     cd C:\path\to\prometheus
+     prometheus.exe --config.file=prometheus.yml
+     ```
+
+### 7. Cài Đặt Grafana
+
+1. Cài đặt Grafana từ [trang chính của Grafana](https://grafana.com/get).
+2. Sau khi cài đặt xong, truy cập vào Grafana tại `http://localhost:3000` (mặc định username và password là `admin`).
+3. Thêm nguồn dữ liệu Prometheus:
+   - Truy cập `Configuration` → `Data Sources`.
+   - Chọn Prometheus, nhập URL: `http://localhost:9090` và lưu lại.
+4. Tạo dashboard mới và sử dụng các metric đã cấu hình trong Prometheus để theo dõi ứng dụng.
+
+## II. Chạy Ứng Dụng
+
+1. Tạo file `.env` trong thư mục gốc và điền cấu hình cơ sở dữ liệu cũng như token GitHub:
+
+   ```
+   GITHUB_TOKENS=your_github_tokens
+   GITHUB_TOKEN=your_single_github_token
+
+   # db config
+   DB_HOST=localhost
+   DB_PORT=3306
+   DB_USER=root
+   DB_PASSWORD=your_password
+   DB_NAME=your_database_name
+   ```
+
+2. Chạy ứng dụng:
+
+   - Đứng ở thư mục gốc của dự án và chạy lệnh sau:
+     ```bash
+     python main_app.main
+     ```
+
+3. Sau khi ứng dụng chạy, bạn có thể theo dõi các chỉ số trong Prometheus và Grafana.
 
 ---
-
-## 🐍 Cài đặt Python Environment
-
-```bash
-# Tạo virtual environment
-python -m venv venv
-
-# Kích hoạt environment
-# Trên Windows:
-venv\Scripts\activate
-
-# Trên macOS/Linux:
-source venv/bin/activate
-
-# Cài đặt thư viện
-pip install -r requirements.txt
-```
-
----
-
-## 🔐 Cấu hình GitHub Token
-
-Tạo file `.env` cùng cấp với `hello.py`:
-
-```
-GITHUB_TOKEN=
-```
-
-> 📌 Bạn nên dùng token của riêng mình nếu không muốn giới hạn rate.
-
----
-
-## 🏃‍♂️ Chạy chương trình
-
-```bash
-python hello.py
-```
-
-Kết quả:
-
-- Reset database
-- Fetch top repo từ GitHub
-- Lưu release & commit tương ứng theo từng release vào DB
-
----
-
-## 🧪 Kiểm tra database
-
-Bạn có thể dùng các công cụ như:
-
-- [MySQL Workbench](https://dev.mysql.com/downloads/workbench/)
-- DBeaver
-- Kết nối trực tiếp qua `pymysql` hoặc `mysqlclient`
-
-Thông tin kết nối:
-
-```
-Host: localhost
-Port: 3306
-User: root
-Password: root
-Database: github_data
-```
-
----
-
-## 💬 Ghi chú cho Team
-
-- Docker chi là một lưa chọn.
-- Bạn **không cần chia sẻ container**, chỉ cần **sử dụng chung cấu hình** để mỗi người tự tạo container giống nhau.
-- Đảm bảo file `.env` được tạo thủ công, không đẩy lên git.
-- Token GitHub có thể thay đổi hoặc hết hạn, bạn tự tạo tại: https://github.com/settings/tokens
-
----
-
-## 🐛 Lỗi thường gặp
-
-| Lỗi                            | Nguyên nhân                               | Giải pháp                                       |
-| ------------------------------ | ----------------------------------------- | ----------------------------------------------- |
-| `pymysql.err.OperationalError` | Chưa bật MySQL container hoặc sai port    | Kiểm tra `docker ps`, chắc chắn MySQL đang chạy |
-| `Data too long for column`     | Commit message quá dài                    | Đã xử lý bằng cắt chuỗi trong code              |
-| `Rate limit exceeded`          | Token GitHub không đủ quyền hoặc hết lượt | Dùng token khác                                 |
-
----
-
-## 👥 Người thực hiện
-
-- ✍️ _nhom 1_
-
-```
-
-```

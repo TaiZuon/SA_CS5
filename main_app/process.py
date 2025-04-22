@@ -120,32 +120,33 @@ async def process_release(session, release, repo_id, owner, repo_name, prev_tag)
     else:
         save_commits_batch(commits, release_id)
 
-async def collect_data(session):
-    page_count = 50
+async def collect_data(session, repo_limit=5000):
+    """Thu thập dữ liệu repo với số lượng giới hạn, xử lý song song bằng các worker."""
     repo_queue = Queue()
+
+    # Tạo worker để xử lý repo song song
     workers = [asyncio.create_task(repo_worker(session, repo_queue, i)) for i in range(MAX_WORKERS)]
 
-    for page in range(1, page_count + 1):
-        # start_time = time.time()
-        try:
-            repos_data = await fetch_top_repos(session, page=page)
-            if not repos_data:
-                logging.warning(f"❌ Không có dữ liệu từ page {page}")
-                continue
-            items = repos_data
-        except Exception as e:
-            logging.warning(f"❌ Bỏ qua page {page} vì lỗi: {e}")
-            continue
+    try:
+        repos_data = await fetch_top_repos(session, limit=repo_limit)
+        if not repos_data:
+            logging.warning("❌ Không fetch được repo nào.")
+            return
 
-        logging.info(f"📦 Page {page}: {len(items)} repos")
+        logging.info(f"📦 Tổng cộng: {len(repos_data)} repo sẽ được xử lý.")
 
-        for repo in items:
+        for repo in repos_data:
             await repo_queue.put(repo)
-            # logging.info(f"🔄 Đã thêm repo {repo['owner']['login']}/{repo['name']} vào hàng đợi")
 
+    except Exception as e:
+        logging.error(f"❌ Lỗi khi fetch top repos: {e}")
+        return
+
+    # Đợi hàng đợi xử lý xong
     await repo_queue.join()
 
     # Gửi tín hiệu dừng đến các worker
     for _ in range(MAX_WORKERS):
         await repo_queue.put(None)
+
     await asyncio.gather(*workers)

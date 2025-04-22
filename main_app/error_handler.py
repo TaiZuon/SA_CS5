@@ -56,7 +56,7 @@ async def safe_request(fetch_func, context=""):
             resp = await fetch_func(token)
 
             # Nếu fetch_func trả về response HTTP, kiểm tra lỗi
-            if hasattr(resp, 'status') and resp.status >= 400:
+            if hasattr(resp, 'status') and resp.status != 200:
                 should_skip = await handle_github_error(resp, token, context)
                 if should_skip:
                     return None  # Bỏ qua repo này
@@ -76,7 +76,7 @@ async def safe_request(fetch_func, context=""):
             logging.info(f"🔁 Retry {retries}/{MAX_RETRY} ({context})")
             await asyncio.sleep(RETRY_DELAY)
 
-    wait_time = wait_until_next_available_token()
+    wait_time = max(wait_until_next_available_token(), 5)
     logging.warning(f"⏸ Đợi {wait_time:.1f}s do hết token khả dụng ({context})")
     await asyncio.sleep(wait_time)
 

@@ -11,10 +11,10 @@ setup_logging()
 async def main():
     reset_db()
 
-    asyncio.create_task(start_metrics_server(port=8000, update_interval=5))
+    start_metrics_server(port=8000, update_interval=5)
 
     async with aiohttp.ClientSession() as session:
-        await collect_data(session)
+        await collect_data(session, 5000)
 
 if __name__ == "__main__":
     import time
