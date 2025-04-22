@@ -42,3 +42,15 @@ def wait_until_next_available_token():
     now = time.time()
     wait_time = max(soonest_time - now, 0)
     return wait_time
+
+if __name__ == "__main__":
+    print("🔍 Trạng thái cooldown các token:\n")
+    now = time.time()
+    for token in TOKENS:
+        reset_time = cooldown_map.get(token, 0)
+        remaining = int(reset_time - now)
+        if remaining > 0:
+            print(f"⛔ Token {token[:10]}... đang cooldown ({remaining} giây còn lại)")
+        else:
+            print(f"✅ Token {token[:10]}... sẵn sàng sử dụng")
+

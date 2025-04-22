@@ -1,3 +1,26 @@
+# GitHub Data Collector
+
+## Thông tin nhóm
+
+- **Nhóm**: 1
+- **Lớp học phần**: INT3105 1
+- **Sinh viên**:
+  - Thân Việt Anh - 22026503
+  - Ngô Quốc An - 22026515
+  - Nguyễn Thái Dương - 22026533
+
+---
+
+## Mô tả dự án
+
+Hệ thống thu thập dữ liệu từ GitHub bao gồm thông tin repository, release và commit của top 5000 repo theo Gitstar Ranking. Hệ thống hỗ trợ:
+
+- Fetch dữ liệu theo thứ tự: repo → release → commit
+- Sử dụng API `/compare/{base}...{head}` để lấy commit giữa hai release
+- Ghi log thời gian, tài nguyên, trạng thái xử lý
+- Có thể lưu dữ liệu vào database hoặc xuất thành file SQL
+- Hỗ trợ retry, cooldown token, theo dõi metric qua Prometheus
+
 # Hướng Dẫn Cài Đặt và Chạy Chương Trình
 
 ## I. Set up
