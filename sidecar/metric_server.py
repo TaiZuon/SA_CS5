@@ -31,10 +31,10 @@ async def metrics_updater(interval=5):
         await update_system_metrics()
         await asyncio.sleep(interval)  # Cập nhật sau mỗi `interval` giây
 
-async def start_metrics_server(port=8000, update_interval=5):
+def start_metrics_server(port=8000, update_interval=5):
     """Khởi động server và cập nhật metric định kỳ"""
     start_http_server(port)
 
-    await metrics_updater(update_interval) 
-
     logging.info(f"Prometheus Metrics Server is running at http://localhost:{port}")
+
+    return asyncio.create_task(metrics_updater(update_interval))

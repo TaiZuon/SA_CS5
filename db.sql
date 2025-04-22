@@ -1,3 +1,7 @@
+CREATE DATABASE IF NOT EXISTS `github_data` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
+
+USE `github_data`;
+
 CREATE TABLE IF NOT EXISTS `repo` (
 	`id` int NOT NULL UNIQUE,
 	`user` text NOT NULL,

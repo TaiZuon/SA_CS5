@@ -25,7 +25,7 @@ DB_CONFIG = {
     "host": os.getenv("DB_HOST", "localhost"),
     "user": os.getenv("DB_USER", "root"),
     "password": os.getenv("DB_PASSWORD", "root"),
-    "database": os.getenv("DB_NAME", "github_data"),
+    "database": os.getenv("DB_NAMEs", "github_data"),
     "port": int(os.getenv("DB_PORT", 3307))
 }
 
@@ -231,14 +231,19 @@ def save_to_db(repos, repo_releases, release_commits):
     log_resource_usage("✅ Dữ liệu đã lưu vào database!")
 
 async def main():
-    start_time = time.time()  # Bắt đầu đo thời gian tổng
-    asyncio.create_task(start_metrics_server(port=8000, update_interval=5))  # Chạy server Prometheus song song
+    start_time = time.time()
+    metrics_task = start_metrics_server(port=8000, update_interval=5)
 
     reset_db()
-    repos, repo_releases, release_commits, avg_repo_time, avg_release_time, avg_commit_time = await fetch_and_log_repos(per_page=50, total=50)
-    save_to_db(repos, repo_releases, release_commits)
-    elapsed_time = time.time() - start_time  # Tính thời gian tổng
+    repos, repo_releases, release_commits, avg_repo_time, avg_release_time, avg_commit_time = await fetch_and_log_repos(per_page=15, total=15)
+
+    # Chạy save_to_db trong thread để không block event loop
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, save_to_db, repos, repo_releases, release_commits)
+
+    elapsed_time = time.time() - start_time
     logging.info(f"Chương trình đã hoàn thành trong {elapsed_time:.2f} giây.")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

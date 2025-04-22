@@ -18,35 +18,45 @@ def build_headers(token):
         "User-Agent": "RepoFetcher 0.0.1"
     }
 
-async def fetch_top_repos(session, page):
-    items = []  # Mảng chứa các repository
-    fetch_counters["repos"] += 1  # Đếm số lần fetch repo
+async def fetch_top_repos(session, limit=5000):
+    """Fetch top repositories từ Gitstar Ranking, với số lượng giới hạn tùy chọn"""
+    items = []
+    page = 1
 
-    url = f"{GITSTAR_RANKING_URL}/repositories?page={page}"
-    logging.info(f"🔎 Fetching repos page {page} (Repos Fetch #{fetch_counters['repos']})")
+    while len(items) < limit:
+        fetch_counters["repos"] += 1
+        url = f"{GITSTAR_RANKING_URL}/repositories?page={page}"
+        logging.info(f"🔎 Fetching repos page {page} (Repos Fetch #{fetch_counters['repos']})")
 
-    async with session.get(url) as resp:
-        html = await resp.text()
+        async with session.get(url) as resp:
+            html = await resp.text()
 
-        soup = BeautifulSoup(html, "html.parser")
+            soup = BeautifulSoup(html, "html.parser")
+            repo_links = soup.select("a.list-group-item.paginated_item")
 
-        # Duyệt qua từng phần tử a.list-group-item.paginated_item trong HTML
-        for idx, a in enumerate(soup.select("a.list-group-item.paginated_item"), start=1):
-            href = a["href"].strip("/")
-            user, name = href.split("/")  # Tách đường dẫn thành user và repo_name
+            if not repo_links:
+                logging.warning("⚠️ Không còn repo nào để fetch.")
+                break  # Không còn dữ liệu
 
-            repo_id = (page - 1) * 100 + idx  # ID tăng dần theo trang và vị trí
+            for idx, a in enumerate(repo_links, start=1):
+                if len(items) >= limit:
+                    break
 
-            # Tạo đối tượng repo
-            repo = {
-                "owner": {"login": user},
-                "name": name,
-                "id": repo_id
-            }
+                href = a["href"].strip("/")
+                user, name = href.split("/")
 
-            items.append(repo)
+                repo_id = (page - 1) * 100 + idx
 
-            #logging.info(f"✅ Found repo: {user}/{name} (ID: {repo_id})")
+                repo = {
+                    "owner": {"login": user},
+                    "name": name,
+                    "id": repo_id
+                }
+                items.append(repo)
+
+        page += 1
+
+    logging.info(f"✅ Đã fetch {len(items)} repo.")
     return items
 
 async def fetch_releases(session, token, owner, repo):
@@ -55,8 +65,21 @@ async def fetch_releases(session, token, owner, repo):
     headers = build_headers(token)
     url = f"{GITHUB_API_URL}/repos/{owner}/{repo}/releases"
     logging.info(f"📦 Fetching releases for {owner}/{repo} (Releases Fetch #{fetch_counters['releases']})")
+
     async with session.get(url, headers=headers) as resp:
-        return await resp.json()
+        try:
+            data = await resp.json()
+
+            if isinstance(data, list):
+                return data
+            elif isinstance(data, dict):
+                return [data]
+            else:
+                logging.warning(f"⚠️ Dữ liệu releases không phải list hoặc dict: {data}")
+                return []
+        except Exception as e:
+            logging.error(f"❌ Lỗi khi parse JSON từ API releases: {e}")
+            return []
 
 async def fetch_commits_between_tags(session, token, owner, repo, base_tag, head_tag):
     fetch_counters["compare"] += 1
