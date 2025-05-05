@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS `commit` (
     `hash` VARCHAR(64) NOT NULL,
     `message` text NOT NULL,
     `releaseID` int NOT NULL,
-    PRIMARY KEY (`hash`, `releaseID`)  -- Composite Key
+    PRIMARY KEY (`hash`, `releaseID`) 
 );
 
 ALTER TABLE `release` 

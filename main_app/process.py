@@ -1,6 +1,7 @@
 import logging
 import asyncio
 import time
+from packaging import version
 from main_app.fetcher import (
     fetch_top_repos, fetch_releases,
     fetch_all_commits_by_tag, fetch_commits_between_tags
@@ -14,8 +15,8 @@ from asyncio import Queue
 from main_app.config import SAVE_MODE
 
 # Semaphore giới hạn xử lý đồng thời
-sem = asyncio.Semaphore(10)
-MAX_WORKERS = 15
+sem = asyncio.Semaphore(100)
+MAX_WORKERS = 100
 
 async def limited_process_repo(session, repo, idx):
     async with sem:
@@ -50,7 +51,7 @@ async def process_repo(session, repo, idx):
         cursor = conn.cursor()
         try:
             conn.begin()
-
+            
             releases = await safe_request(
                 lambda token: fetch_releases(session, token, owner, repo_name),
                 context=f"{owner}/{repo_name} - releases"
@@ -60,12 +61,12 @@ async def process_repo(session, repo, idx):
                 logging.info(f"⛔ Repo {owner}/{repo_name} không có release. Bỏ qua.")
                 return
 
-            releases.sort(key=lambda r: r.get("published_at") or "", reverse=False)
-
             if SAVE_MODE == "sql":
                 await save_repo_sql(repo)
             else:
                 save_repo(repo)
+
+            releases.sort(key=lambda r: r.get("published_at") or "", reverse=False)
 
             prev_tag = None
             for release in releases:
@@ -102,12 +103,23 @@ async def process_release(session, release, repo_id, owner, repo_name, prev_tag)
         save_release(release, repo_id)
 
     if not tag_name:
+        logging.warning(f"⚠️ Release {release_id} không có tag_name. Bỏ qua.")
         return
 
+
     if prev_tag:
+        # So sánh theo version để đảm bảo chiều đúng
+        try:
+            v_prev = version.parse(prev_tag)
+            v_curr = version.parse(tag_name)
+        except Exception:
+            v_prev = prev_tag
+            v_curr = tag_name
+        base, head = (prev_tag, tag_name) if v_prev <= v_curr else (tag_name, prev_tag)
+
         commits = await safe_request(
-            lambda token: fetch_commits_between_tags(session, token, owner, repo_name, prev_tag, tag_name),
-            context=f"{owner}/{repo_name} - compare {prev_tag}...{tag_name}"
+            lambda token: fetch_commits_between_tags(session, token, owner, repo_name, base, head),
+            context=f"{owner}/{repo_name} - compare {base}...{head}"
         )
     else:
         commits = await safe_request(

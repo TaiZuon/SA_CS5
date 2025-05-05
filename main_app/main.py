@@ -1,7 +1,7 @@
 import asyncio
 import aiohttp
 import logging
-from main_app.database import reset_db
+from main_app.database import reset_db, wait_for_db
 from main_app.process import collect_data
 from sidecar.log_writing import setup_logging
 from sidecar.metric_server import start_metrics_server 
@@ -9,6 +9,7 @@ from sidecar.metric_server import start_metrics_server
 setup_logging()
 
 async def main():
+    wait_for_db()
     reset_db()
 
     start_metrics_server(port=8000, update_interval=5)

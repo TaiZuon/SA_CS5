@@ -2,6 +2,7 @@ import os
 import time
 import itertools
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
 
@@ -18,7 +19,7 @@ def mark_token_cooldown(token: str, reset_time_epoch: int):
     """
     cooldown_map[token] = reset_time_epoch
     remaining = int(reset_time_epoch - time.time())
-    print(f"🕒 Token {token[:10]}... cooldown đến {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(reset_time_epoch))} ({remaining} giây còn lại)")
+    logging.info(f"🕒 Token {token[:10]}... cooldown đến {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(reset_time_epoch))} ({remaining} giây còn lại)")
 
 def get_valid_token() -> str:
     """
@@ -41,6 +42,7 @@ def wait_until_next_available_token():
     soonest_time = min(cooldown_map.values(), default=0)
     now = time.time()
     wait_time = max(soonest_time - now, 0)
+    logging.info(f"⏳ Đợi {wait_time:.1f}s cho token khả dụng tiếp theo")
     return wait_time
 
 if __name__ == "__main__":

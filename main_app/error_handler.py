@@ -3,81 +3,96 @@ import time
 import asyncio
 from main_app.token_rotator import mark_token_cooldown, get_valid_token, wait_until_next_available_token
 from sidecar.metric_server import ERROR_COUNT
+import re
 
 MAX_RETRY = 5
 RETRY_DELAY = 2  
 
-async def handle_github_error(resp, token, context=""):
+async def handle_github_error(e, token, context=""):
     """
-    Phân tích lỗi GitHub API và quyết định có nên dừng hay tiếp tục.
+    Phân tích lỗi GitHub API từ message và quyết định có nên dừng hay tiếp tục khi bắt được ngoại lệ.
     Trả về True nếu lỗi nghiêm trọng và nên bỏ qua request.
     """
-    status = resp.status
-    json_body = await resp.json()
-    message = json_body.get("message", "No message provided")
+    # Lấy thông điệp từ ngoại lệ
+    message = str(e)
 
-    reset_ts = resp.headers.get("X-RateLimit-Reset")
-    if reset_ts:
-        reset_ts = int(reset_ts)
-        now = int(time.time())
-        remaining = reset_ts - now
+    # Mặc định cooldown là 60 giây
+    reset_ts = int(time.time()) + 60
+    reset_info = "Không rõ thời gian reset"
+
+    # Tìm timestamp từ message
+    match = re.search(r"reset_ts=(\d+)", message)
+    if match:
+        reset_ts = int(match.group(1))
+        remaining = reset_ts - int(time.time())
         reset_info = f"⏳ Reset sau {remaining} giây"
     else:
-        reset_ts = int(time.time()) + 60
         reset_info = "Không rõ thời gian reset"
 
     ERROR_COUNT.inc()  # Tăng mỗi lần gặp lỗi
 
-    match status:
-        case 403:
-            logging.warning(f"⚠️ 403 Forbidden tại {context}: {message}. Token {token[:8]}... cooldown. {reset_info}")
-            mark_token_cooldown(token, reset_ts)
-            return False
-        case 401:
-            logging.warning(f"❌ 401 Unauthorized tại {context}: Token {token[:8]}... không hợp lệ hoặc hết hạn.")
-            mark_token_cooldown(token, reset_ts)
-            return False
-        case 422:
-            logging.warning(f"⚠️ 422 Unprocessable Entity tại {context}: {message}")
-            return True  # lỗi nghiêm trọng, bỏ qua request
-        case status if 500 <= status < 600:
-            logging.warning(f"🔥 Lỗi server {status} tại {context}: {message}")
-            return False  # server error, có thể retry
-        case _:
-            logging.warning(f"⚠️ Lỗi {status} tại {context}: {message}")
-            return True  # mặc định bỏ qua request
-        
+    # Kiểm tra thông điệp lỗi
+    if "HTTP 403" in message:
+        # Lỗi 403 Forbidden
+        logging.warning(f"⚠️ 403 Forbidden tại {context}: {message}. Token {token[:8]}... cooldown. {reset_info}")
+        mark_token_cooldown(token, reset_ts)
+        return False  # Có thể retry
+    elif "HTTP 401" in message:
+        # Lỗi 401 Unauthorized
+        logging.warning(f"❌ 401 Unauthorized tại {context}: Token {token[:8]}... không hợp lệ hoặc hết hạn.")
+        mark_token_cooldown(token, int(time.time()) + 100)
+        return True  # Có thể retry
+    elif "HTTP 422" in message:
+        # Lỗi 422 Unprocessable Entity
+        logging.warning(f"⚠️ 422 Unprocessable Entity tại {context}: {message}")
+        return True  # Lỗi nghiêm trọng, bỏ qua request
+    elif "HTTP" in message and int(message.split('HTTP ')[1].split()[0]) >= 500:
+        # Lỗi từ server (500-599)
+        logging.warning(f"🔥 Lỗi server tại {context}: {message}")
+        return False  # Có thể retry
+    else:
+        # Các lỗi khác
+        logging.warning(f"⚠️ Lỗi tại {context}: {message}")
+        return True  # Mặc định bỏ qua request
+
 async def safe_request(fetch_func, context=""):
     retries = 0
 
     while retries < MAX_RETRY:
-        token = get_valid_token()
+        token = None
         try:
-            resp = await fetch_func(token)
+            token = get_valid_token()
+            logging.info(f"🔑 Sử dụng token {token[:10]}... cho request ({context})")
+            result = await fetch_func(token)
 
-            # Nếu fetch_func trả về response HTTP, kiểm tra lỗi
-            if hasattr(resp, 'status') and resp.status != 200:
-                should_skip = await handle_github_error(resp, token, context)
-                if should_skip:
-                    return None  # Bỏ qua repo này
-                else:
-                    retries += 1
-                    logging.info(f"🔁 Retry {retries}/{MAX_RETRY} ({context})")
-                    await asyncio.sleep(RETRY_DELAY)
-                    continue
-
-            # Nếu không phải response (fetch_func tự xử lý và trả về JSON chẳng hạn)
-            if resp is not None:
-                return resp
+            if isinstance(result, list):
+                return result
 
         except Exception as e:
-            logging.warning(f"⚠️ Request lỗi ({context}): {e}")
             retries += 1
-            logging.info(f"🔁 Retry {retries}/{MAX_RETRY} ({context})")
-            await asyncio.sleep(RETRY_DELAY)
+            logging.warning(f"⚠️ Request lỗi ({context}): {e}")
 
-    wait_time = max(wait_until_next_available_token(), 5)
-    logging.warning(f"⏸ Đợi {wait_time:.1f}s do hết token khả dụng ({context})")
-    await asyncio.sleep(wait_time)
+            # Nếu lỗi xảy ra trước khi lấy token hợp lệ
+            if token is None:
+                if "Không còn token nào khả dụng" in str(e):
+                    wait_time = max(wait_until_next_available_token(), 5)
+                    logging.warning(f"⏸ Đợi {wait_time:.1f}s do hết token khả dụng ({context})")
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    raise e  # lỗi không phải do token
 
+            # Có token → xử lý lỗi liên quan tới GitHub API
+            should_skip = await handle_github_error(e, token, context)
+
+            if should_skip:
+                return None
+            elif retries < MAX_RETRY:
+                logging.info(f"🔁 Thử lại sau {RETRY_DELAY} giây... (Retry {retries}/{MAX_RETRY})")
+                await asyncio.sleep(RETRY_DELAY)
+            else:
+                logging.warning(f"❌ Thử lại thất bại sau {MAX_RETRY} lần.")
+                raise e
+
+    # Nếu hết lượt retry
     raise Exception(f"❌ Request thất bại sau {MAX_RETRY} lần ({context})")

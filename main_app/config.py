@@ -8,11 +8,11 @@ GITHUB_API_URL = "https://api.github.com"
 GITSTAR_RANKING_URL = "https://gitstar-ranking.com"
 
 DB_CONFIG = {
-    "host": os.getenv("DB_HOST", "localhost"),
+    "host": os.getenv("DB_HOST", "db"),
     "user": os.getenv("DB_USER", "root"),
     "password": os.getenv("DB_PASSWORD", "root"),
-    "database": os.getenv("DB_NAME", "github_data_new"),
-    "port": int(os.getenv("DB_PORT", 3307))
+    "database": os.getenv("DB_NAME", "github_data"),
+    "port": int(os.getenv("DB_PORT", 3306))
 }
 
 LOGGING_CONFIG = {
